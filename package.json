@@ -1,7 +1,9 @@
 {
   "name": "@soukadao/remark-data-table",
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
@@ -10,11 +12,11 @@
     }
   },
   "files": [
-    "dist",
-    "src"
+    "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc",
+    "prepack": "bun run build",
     "test": "bun test tests"
   },
   "dependencies": {
