@@ -11,6 +11,7 @@ import type {
   DataTableEncoding,
   DataTableFetch,
   DataTableFormat,
+  DataTableScrollSize,
   RemarkDataTableOptions,
 } from "./types.js";
 
@@ -20,6 +21,7 @@ export type {
   DataTableEncoding,
   DataTableFetch,
   DataTableFormat,
+  DataTableScrollSize,
   RemarkDataTableOptions,
 } from "./types.js";
 
@@ -38,6 +40,7 @@ type NormalizedOptions = {
   empty: string;
   encoding: DataTableEncoding;
   fetch: DataTableFetch;
+  maxHeight?: string;
 };
 
 const pseudoPattern = /^::data-table(?:\s+(.+?))?\s*$/;
@@ -83,6 +86,27 @@ function parseNumber(value: unknown): number | undefined {
 
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function parseScrollSize(value: unknown): string | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value >= 0 ? `${value}px` : undefined;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    return undefined;
+  }
+  if (/^\d+(?:\.\d+)?$/.test(normalized)) {
+    return `${normalized}px`;
+  }
+
+  return /^calc\([^)]+\)$|^\d+(?:\.\d+)?(?:px|r?em|vh|vw|vmin|vmax|dvh|dvw|svh|svw|lvh|lvw|%)$/i.test(normalized)
+    ? normalized
+    : undefined;
 }
 
 function parseColumns(value: unknown): string[] | undefined {
@@ -187,6 +211,9 @@ function directiveFromAttributes(attributes: Record<string, unknown>, options: N
     kind: typeof attributes.kind === "string" ? attributes.kind : undefined,
     limit: parseNumber(attributes.limit),
     className: parseClassName(attributes.class ?? attributes.className),
+    maxHeight: parseScrollSize(
+      attributes.maxHeight ?? attributes["max-height"] ?? attributes.maxheight ?? attributes.height,
+    ) ?? options.maxHeight,
     empty: typeof attributes.empty === "string" ? attributes.empty : options.empty,
   };
 }
@@ -343,6 +370,19 @@ function tableNode(data: DataTableData): Table {
   };
 }
 
+function wrapperStyle(directive: DataTableDirective): string {
+  const declarations = [
+    "max-width: 100%",
+    "overflow-x: auto",
+  ];
+
+  if (directive.maxHeight) {
+    declarations.push(`max-height: ${directive.maxHeight}`, "overflow-y: auto");
+  }
+
+  return declarations.join("; ");
+}
+
 function wrapperNode(data: DataTableData, directive: DataTableDirective): Blockquote {
   const className = ["remark-data-table", ...(directive.className ?? [])];
   const children: Blockquote["children"] = [
@@ -356,11 +396,13 @@ function wrapperNode(data: DataTableData, directive: DataTableDirective): Blockq
       hName: "div",
       hProperties: {
         className,
+        style: wrapperStyle(directive),
         dataTableSrc: data.src,
         dataTableKind: data.kind,
         dataTableFormat: data.format,
         dataTableEncoding: data.encoding,
         dataTableHeader: String(data.header),
+        ...(directive.maxHeight ? { dataTableMaxHeight: directive.maxHeight } : {}),
       },
       dataTable: data,
     },
@@ -425,6 +467,7 @@ const remarkDataTable: Plugin<[RemarkDataTableOptions?], Root> = (options = {}) 
     empty: options.empty ?? "",
     encoding: options.encoding ?? "utf-8",
     fetch: options.fetch ?? globalThis.fetch,
+    maxHeight: parseScrollSize(options.maxHeight),
   };
 
   return async (tree: Root, file: VFile) => {

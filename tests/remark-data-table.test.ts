@@ -38,6 +38,7 @@ describe("remarkDataTable", () => {
     expect(wrapper?.data?.hName).toBe("div");
     expect(wrapper?.data?.hProperties).toEqual({
       className: ["remark-data-table"],
+      style: "max-width: 100%; overflow-x: auto",
       dataTableSrc: "./data/requirements.csv",
       dataTableKind: "requirements",
       dataTableFormat: "csv",
@@ -96,11 +97,32 @@ describe("remarkDataTable", () => {
 
     expect(tree.children[0]?.data?.hProperties).toEqual({
       className: ["remark-data-table", "compact", "scroll"],
+      style: "max-width: 100%; overflow-x: auto",
       dataTableSrc: "./data/requirements.csv",
       dataTableKind: "requirements",
       dataTableFormat: "csv",
       dataTableEncoding: "utf-8",
       dataTableHeader: "true",
+    });
+  });
+
+  test("adds vertical scrolling when max height is configured on a directive", async () => {
+    const { tree, file } = await createTree("vertical-scroll.md");
+    expect(file.messages).toHaveLength(0);
+
+    expect(tree.children[0]?.data?.hProperties).toMatchObject({
+      style: "max-width: 100%; overflow-x: auto; max-height: 16rem; overflow-y: auto",
+      dataTableMaxHeight: "16rem",
+    });
+  });
+
+  test("uses configured max height option", async () => {
+    const { tree, file } = await createTree("basic.md", { maxHeight: 320 });
+    expect(file.messages).toHaveLength(0);
+
+    expect(tree.children[0]?.data?.hProperties).toMatchObject({
+      style: "max-width: 100%; overflow-x: auto; max-height: 320px; overflow-y: auto",
+      dataTableMaxHeight: "320px",
     });
   });
 

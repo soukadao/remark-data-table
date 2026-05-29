@@ -7,6 +7,8 @@ export type DataTableFetch = (url: string) => Promise<{
   arrayBuffer(): Promise<ArrayBuffer>;
 }>;
 
+export type DataTableScrollSize = number | string;
+
 export type DataTableDirective = {
   src: string;
   format: DataTableFormat;
@@ -17,6 +19,7 @@ export type DataTableDirective = {
   kind?: string;
   limit?: number;
   className?: string[];
+  maxHeight?: string;
   empty: string;
 };
 
@@ -37,4 +40,5 @@ export type RemarkDataTableOptions = {
   empty?: string;
   encoding?: DataTableEncoding;
   fetch?: DataTableFetch;
+  maxHeight?: DataTableScrollSize;
 };
