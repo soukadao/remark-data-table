@@ -1,0 +1,11 @@
+name: my-project
+version: 1.0.0
+description: My Project
+author: soukadao
+dependencies:
+  apm: []
+  mcp: []
+includes: auto
+scripts: {}
+targets:
+  - codex

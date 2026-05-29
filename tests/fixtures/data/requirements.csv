@@ -1,0 +1,3 @@
+id,type,priority,status,title
+REQ-001,functional,must,approved,ユーザー検索
+REQ-002,functional,should,draft,ユーザー停止
