@@ -5,11 +5,20 @@ import type { Plugin } from "unified";
 import { visit } from "unist-util-visit";
 import type { VFile } from "vfile";
 import { parseDelimited } from "./parse-delimited.js";
-import type { DataTableData, DataTableDirective, DataTableFormat, RemarkDataTableOptions } from "./types.js";
+import type {
+  DataTableData,
+  DataTableDirective,
+  DataTableEncoding,
+  DataTableFetch,
+  DataTableFormat,
+  RemarkDataTableOptions,
+} from "./types.js";
 
 export type {
   DataTableData,
   DataTableDirective,
+  DataTableEncoding,
+  DataTableFetch,
   DataTableFormat,
   RemarkDataTableOptions,
 } from "./types.js";
@@ -27,6 +36,8 @@ type NormalizedOptions = {
   validate: boolean;
   baseDir?: string;
   empty: string;
+  encoding: DataTableEncoding;
+  fetch: DataTableFetch;
 };
 
 const pseudoPattern = /^::data-table(?:\s+(.+?))?\s*$/;
@@ -100,6 +111,15 @@ function normalizeFormat(value: unknown): DataTableFormat {
   return value === "csv" || value === "tsv" || value === "auto" ? value : "auto";
 }
 
+function normalizeEncoding(value: unknown, fallback: DataTableEncoding): DataTableEncoding {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase().replace(/-/g, "_");
+  return normalized === "shift_jis" || normalized === "sjis" ? "shift_jis" : "utf-8";
+}
+
 function splitArgs(value: string): string[] {
   const args: string[] = [];
   let current = "";
@@ -160,6 +180,7 @@ function directiveFromAttributes(attributes: Record<string, unknown>, options: N
   return {
     src: src.trim(),
     format: normalizeFormat(attributes.format),
+    encoding: normalizeEncoding(attributes.encoding ?? attributes.charset, options.encoding),
     header: parseBoolean(attributes.header ?? attributes.headers, true),
     columns: parseColumns(attributes.columns),
     caption: typeof attributes.caption === "string" ? attributes.caption : undefined,
@@ -180,6 +201,10 @@ function directiveFromPseudo(value: string, options: NormalizedOptions): DataTab
 }
 
 function resolveSource(src: string, file: VFile, options: NormalizedOptions): string {
+  if (isUrl(src)) {
+    return src;
+  }
+
   if (isAbsolute(src)) {
     return src;
   }
@@ -195,6 +220,46 @@ function inferFormat(src: string, requested: DataTableFormat): Exclude<DataTable
   }
 
   return extname(src).toLowerCase() === ".tsv" ? "tsv" : "csv";
+}
+
+function isUrl(src: string): boolean {
+  return /^https?:\/\//i.test(src);
+}
+
+function decodeBytes(bytes: ArrayBuffer | Uint8Array, encoding: DataTableEncoding): string {
+  return new TextDecoder(encoding).decode(bytes);
+}
+
+async function readSource(directive: DataTableDirective, file: VFile, node: unknown, options: NormalizedOptions): Promise<string | undefined> {
+  if (isUrl(directive.src)) {
+    try {
+      const response = await options.fetch(directive.src);
+      if (!response.ok) {
+        if (options.validate) {
+          message(file, `Data table source request failed: ${directive.src} (${response.status})`, node);
+        }
+        return undefined;
+      }
+
+      return decodeBytes(await response.arrayBuffer(), directive.encoding);
+    } catch (error) {
+      if (options.validate) {
+        const reason = error instanceof Error ? error.message : String(error);
+        message(file, `Data table source request failed: ${directive.src}: ${reason}`, node);
+      }
+      return undefined;
+    }
+  }
+
+  const path = resolveSource(directive.src, file, options);
+  if (!existsSync(path)) {
+    if (options.validate) {
+      message(file, `Data table source not found: ${directive.src}`, node);
+    }
+    return undefined;
+  }
+
+  return decodeBytes(readFileSync(path), directive.encoding);
 }
 
 function tableCell(value: string): TableCell {
@@ -220,18 +285,14 @@ function normalizeRows(rows: string[][], width: number, empty: string): string[]
   ));
 }
 
-function loadDataTable(directive: DataTableDirective, file: VFile, node: unknown, options: NormalizedOptions): DataTableData | undefined {
-  const path = resolveSource(directive.src, file, options);
-  if (!existsSync(path)) {
-    if (options.validate) {
-      message(file, `Data table source not found: ${directive.src}`, node);
-    }
+async function loadDataTable(directive: DataTableDirective, file: VFile, node: unknown, options: NormalizedOptions): Promise<DataTableData | undefined> {
+  const source = await readSource(directive, file, node, options);
+  if (source === undefined) {
     return undefined;
   }
-
   const format = inferFormat(directive.src, directive.format);
   const delimiter = format === "tsv" ? "\t" : ",";
-  const parsedRows = parseDelimited(readFileSync(path, "utf8"), delimiter);
+  const parsedRows = parseDelimited(source, delimiter);
   if (parsedRows.length === 0) {
     if (options.validate) {
       message(file, `Data table source is empty: ${directive.src}`, node);
@@ -249,6 +310,7 @@ function loadDataTable(directive: DataTableDirective, file: VFile, node: unknown
   return {
     src: directive.src,
     format,
+    encoding: directive.encoding,
     header: directive.header,
     columns: normalizeRows([columns], width, directive.empty)[0],
     rows: normalizeRows(limitedRows, width, directive.empty),
@@ -297,6 +359,7 @@ function wrapperNode(data: DataTableData, directive: DataTableDirective): Blockq
         dataTableSrc: data.src,
         dataTableKind: data.kind,
         dataTableFormat: data.format,
+        dataTableEncoding: data.encoding,
         dataTableHeader: String(data.header),
       },
       dataTable: data,
@@ -305,7 +368,7 @@ function wrapperNode(data: DataTableData, directive: DataTableDirective): Blockq
   };
 }
 
-function transformDirectiveNode(node: DirectiveNode, file: VFile, options: NormalizedOptions): void {
+async function transformDirectiveNode(node: DirectiveNode, file: VFile, options: NormalizedOptions): Promise<void> {
   if (node.type !== "containerDirective" && node.type !== "leafDirective" && node.type !== "textDirective") {
     return;
   }
@@ -321,7 +384,7 @@ function transformDirectiveNode(node: DirectiveNode, file: VFile, options: Norma
     return;
   }
 
-  const data = loadDataTable(directive, file, node, options);
+  const data = await loadDataTable(directive, file, node, options);
   if (!data) {
     return;
   }
@@ -331,7 +394,7 @@ function transformDirectiveNode(node: DirectiveNode, file: VFile, options: Norma
   node.children = wrapper.children;
 }
 
-function transformPseudoNodes(tree: Root, file: VFile, options: NormalizedOptions): void {
+async function transformPseudoNodes(tree: Root, file: VFile, options: NormalizedOptions): Promise<void> {
   for (let index = 0; index < tree.children.length; index += 1) {
     const node = tree.children[index];
     const text = paragraphText(node);
@@ -344,7 +407,7 @@ function transformPseudoNodes(tree: Root, file: VFile, options: NormalizedOption
       continue;
     }
 
-    const data = loadDataTable(directive, file, node, options);
+    const data = await loadDataTable(directive, file, node, options);
     if (!data) {
       tree.children.splice(index, 1);
       index -= 1;
@@ -360,13 +423,19 @@ const remarkDataTable: Plugin<[RemarkDataTableOptions?], Root> = (options = {}) 
     validate: options.validate ?? true,
     baseDir: options.baseDir,
     empty: options.empty ?? "",
+    encoding: options.encoding ?? "utf-8",
+    fetch: options.fetch ?? globalThis.fetch,
   };
 
-  return (tree: Root, file: VFile) => {
-    transformPseudoNodes(tree, file, normalized);
+  return async (tree: Root, file: VFile) => {
+    await transformPseudoNodes(tree, file, normalized);
+    const directiveNodes: DirectiveNode[] = [];
     visit(tree, (node: unknown) => {
-      transformDirectiveNode(node as DirectiveNode, file, normalized);
+      directiveNodes.push(node as DirectiveNode);
     });
+    for (const node of directiveNodes) {
+      await transformDirectiveNode(node, file, normalized);
+    }
   };
 };
 

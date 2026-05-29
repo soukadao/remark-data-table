@@ -14,7 +14,7 @@ function fixture(name: string): string {
   return readFileSync(join(fixtureDir, name), "utf8");
 }
 
-function createTree(name: string, options = {}) {
+async function createTree(name: string, options = {}) {
   const processor = unified()
     .use(remarkParse)
     .use(remarkDirective)
@@ -25,13 +25,13 @@ function createTree(name: string, options = {}) {
     path: join(fixtureDir, name),
   });
   const tree = processor.parse(file) as Root;
-  const result = processor.runSync(tree, file) as Root;
+  const result = await processor.run(tree, file) as Root;
   return { tree: result, file };
 }
 
 describe("remarkDataTable", () => {
-  test("loads CSV with header row", () => {
-    const { tree, file } = createTree("basic.md");
+  test("loads CSV with header row", async () => {
+    const { tree, file } = await createTree("basic.md");
     expect(file.messages).toHaveLength(0);
 
     const wrapper = tree.children[0];
@@ -41,11 +41,13 @@ describe("remarkDataTable", () => {
       dataTableSrc: "./data/requirements.csv",
       dataTableKind: "requirements",
       dataTableFormat: "csv",
+      dataTableEncoding: "utf-8",
       dataTableHeader: "true",
     });
     expect(wrapper?.data?.dataTable).toEqual({
       src: "./data/requirements.csv",
       format: "csv",
+      encoding: "utf-8",
       header: true,
       columns: ["id", "type", "priority", "status", "title"],
       rows: [
@@ -61,13 +63,14 @@ describe("remarkDataTable", () => {
     expect(wrapper?.children[1]?.type).toBe("table");
   });
 
-  test("uses manual columns when header is false", () => {
-    const { tree, file } = createTree("no-header.md");
+  test("uses manual columns when header is false", async () => {
+    const { tree, file } = await createTree("no-header.md");
     expect(file.messages).toHaveLength(0);
 
     expect(tree.children[0]?.data?.dataTable).toMatchObject({
       src: "./data/events.tsv",
       format: "tsv",
+      encoding: "utf-8",
       header: false,
       columns: ["イベントID", "名称", "発火条件", "備考"],
       rows: [
@@ -77,8 +80,8 @@ describe("remarkDataTable", () => {
     });
   });
 
-  test("applies limit and empty value", () => {
-    const { tree, file } = createTree("limit-empty.md");
+  test("applies limit and empty value", async () => {
+    const { tree, file } = await createTree("limit-empty.md");
     expect(file.messages).toHaveLength(0);
 
     expect(tree.children[0]?.data?.dataTable).toMatchObject({
@@ -87,8 +90,8 @@ describe("remarkDataTable", () => {
     });
   });
 
-  test("supports directive attributes", () => {
-    const { tree, file } = createTree("directive.md");
+  test("supports directive attributes", async () => {
+    const { tree, file } = await createTree("directive.md");
     expect(file.messages).toHaveLength(0);
 
     expect(tree.children[0]?.data?.hProperties).toEqual({
@@ -96,17 +99,40 @@ describe("remarkDataTable", () => {
       dataTableSrc: "./data/requirements.csv",
       dataTableKind: "requirements",
       dataTableFormat: "csv",
+      dataTableEncoding: "utf-8",
       dataTableHeader: "true",
     });
   });
 
-  test("reports missing files", () => {
-    const { file } = createTree("missing.md");
+  test("loads remote CSV URLs", async () => {
+    const encoder = new TextEncoder();
+    const { tree, file } = await createTree("url.md", {
+      fetch: async (url: string) => ({
+        ok: url === "https://example.test/holidays.csv",
+        status: 200,
+        arrayBuffer: async () => encoder.encode("date,name\n2026-01-01,New Year\n").buffer,
+      }),
+    });
+    expect(file.messages).toHaveLength(0);
+    expect(tree.children[0]?.data?.dataTable).toMatchObject({
+      src: "https://example.test/holidays.csv",
+      format: "csv",
+      encoding: "shift_jis",
+      columns: ["date", "name"],
+      rows: [["2026-01-01", "New Year"]],
+    });
+    expect(tree.children[0]?.data?.hProperties).toMatchObject({
+      dataTableEncoding: "shift_jis",
+    });
+  });
+
+  test("reports missing files", async () => {
+    const { file } = await createTree("missing.md");
     expect(file.messages.some((message) => message.fatal === true && /source not found/.test(message.reason))).toBe(true);
   });
 
-  test("suppresses validation messages when validate is false", () => {
-    const { file } = createTree("missing.md", { validate: false });
+  test("suppresses validation messages when validate is false", async () => {
+    const { file } = await createTree("missing.md", { validate: false });
     expect(file.messages).toHaveLength(0);
   });
 });

@@ -1,8 +1,16 @@
 export type DataTableFormat = "auto" | "csv" | "tsv";
+export type DataTableEncoding = "utf-8" | "shift_jis";
+
+export type DataTableFetch = (url: string) => Promise<{
+  ok: boolean;
+  status: number;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}>;
 
 export type DataTableDirective = {
   src: string;
   format: DataTableFormat;
+  encoding: DataTableEncoding;
   header: boolean;
   columns?: string[];
   caption?: string;
@@ -15,6 +23,7 @@ export type DataTableDirective = {
 export type DataTableData = {
   src: string;
   format: Exclude<DataTableFormat, "auto">;
+  encoding: DataTableEncoding;
   header: boolean;
   columns: string[];
   rows: string[][];
@@ -26,4 +35,6 @@ export type RemarkDataTableOptions = {
   validate?: boolean;
   baseDir?: string;
   empty?: string;
+  encoding?: DataTableEncoding;
+  fetch?: DataTableFetch;
 };
